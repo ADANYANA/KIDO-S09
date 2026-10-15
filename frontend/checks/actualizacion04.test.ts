@@ -1,0 +1,34 @@
+import '@angular/compiler';
+import assert from 'node:assert/strict';
+import {createEnvironmentInjector,runInInjectionContext} from '@angular/core';
+import {HttpClient,HttpEventType} from '@angular/common/http';
+import {of,throwError,Subject} from 'rxjs';
+import {Docente} from '../src/app/pages/docente/docente';
+import {Estudiante} from '../src/app/pages/estudiante/estudiante';
+import {Admin} from '../src/app/pages/admin/admin';
+import {Api} from '../src/app/core/services/api';
+import {Auth} from '../src/app/core/services/auth';
+import {AccountContext} from '../src/app/core/services/account-context';
+let count=0;
+function test(name:string,fn:()=>void){fn();count++;console.log(`OK ${count}: ${name}`)}
+const config={cursoId:1,progresoMinimo:100,asistenciaMinima:0,certificadoHabilitado:false,certificadoCosto:0};
+const curso={id:1,titulo:'Python',descripcion:'Curso',tipo:'GRATUITO' as const,precio:0,docenteId:1,categoriaId:1,categoria:'Tecnología',estado:'BORRADOR'};
+const contenido={cursoId:1,titulo:'Python',configuracion:config,modulos:[{id:3,cursoId:1,titulo:'Introducción',orden:1,lecciones:[{id:5,moduloId:3,titulo:'Instalación',orden:1,urlContenido:'',materiales:[]}]}]};
+function instance<T>(type:new()=>T,api:object):T{const i=createEnvironmentInjector([{provide:Api,useValue:api},{provide:Auth,useValue:{usuario:'Prueba'}},{provide:AccountContext,useValue:{id:()=>1,setId:()=>true}}],null as any);return runInInjectionContext(i,()=>new type())}
+test('Un fallo financiero conserva los cursos del docente',()=>{const d=instance(Docente,{cursosDocente:()=>of([curso]),ordenesDocente:()=>throwError(()=>new Error('Pagos caídos')),saldoDocente:()=>of(null),retirosDocente:()=>of([])});d.cargar();assert.equal(d.cursos().length,1);assert.equal(d.fallos().length,1);assert.equal(d.cargando(),false)});
+test('No se crea un módulo con posición duplicada',()=>{let calls=0;const d=instance(Docente,{crearModulo:()=>{calls++;return of({})}});d.seleccionado.set(curso);d.contenido.set(contenido);d.moduloTitulo='Otro';d.moduloOrden=1;d.crearModulo();assert.equal(calls,0);assert.match(d.error(),/existe/)});
+test('Posiciones decimales se rechazan',()=>{const d=instance(Docente,{});d.seleccionado.set(curso);d.moduloTitulo='Otro';d.moduloOrden=1.5;d.crearModulo();assert.match(d.error(),/entero/)});
+test('El siguiente número de lección se calcula por módulo',()=>{const d=instance(Docente,{});d.contenido.set(contenido);d.seleccionarModulo(3);assert.equal(d.leccionOrden,2)});
+test('Un enlace de script no se guarda como contenido',()=>{const d=instance(Docente,{});d.seleccionado.set(curso);d.contenido.set(contenido);d.moduloId=3;d.leccionTitulo='Nueva';d.leccionOrden=2;d.leccionUrl='javascript:alert(1)';d.crearLeccion();assert.match(d.error(),/https/)});
+test('La selección de archivos rechaza extensiones no permitidas',()=>{const d=instance(Docente,{});const target={files:{item:()=>new File(['x'],'programa.exe')},value:'programa.exe'};d.elegirArchivo({target} as any);assert.equal(d.archivo,null);assert.equal(target.value,'')});
+test('La selección de archivos acepta un PDF válido',()=>{const d=instance(Docente,{});d.elegirArchivo({target:{files:{item:()=>new File(['pdf'],'guia.pdf')}}} as any);assert.equal(d.archivo?.name,'guia.pdf')});
+test('Doble clic no crea dos lecciones',()=>{let calls=0;const pending=new Subject();const d=instance(Docente,{crearLeccion:()=>{calls++;return pending}});d.seleccionado.set(curso);d.contenido.set(contenido);d.moduloId=3;d.leccionTitulo='Nueva';d.leccionOrden=2;d.crearLeccion();d.crearLeccion();assert.equal(calls,1)});
+test('Una respuesta antigua no reemplaza el curso actual',()=>{const first=new Subject<any>(),second=new Subject<any>();const d=instance(Docente,{contenido:(id:number)=>id===1?first:second});d.seleccionado.set(curso);d.verContenido(1);d.seleccionado.set({...curso,id:2});d.verContenido(2);second.next({...contenido,cursoId:2,titulo:'Actual'});first.next(contenido);assert.equal(d.contenido()?.cursoId,2)});
+test('Continuar selecciona la primera lección pendiente',()=>{const e=instance(Estudiante,{});e.contenido.set(contenido);e.continuar();assert.equal(e.leccionActiva(),5)});
+test('Registrar retiro pagado requiere confirmar transferencia',()=>{let calls=0;const a=instance(Admin,{pagarRetiro:()=>{calls++;return of({})}});a.abrirDialogo('retiro',1,'pagar');a.dato='OP123';a.confirmarDialogo();assert.equal(calls,0)});
+test('Cancelar una eliminación no llama al backend',()=>{const d=instance(Docente,{});d.eliminar('eliminarModulo',3,'Vacío');d.cerrarDialogo();assert.equal(d.dialogo(),null)});
+test('CRUD de contenido usa las rutas existentes del backend',()=>{const calls:any[]=[];const http={put:(...args:any[])=>{calls.push(['PUT',...args]);return of({})},delete:(...args:any[])=>{calls.push(['DELETE',...args]);return of({})}};const inj=createEnvironmentInjector([{provide:HttpClient,useValue:http}],null as any);const api=runInInjectionContext(inj,()=>new Api());api.actualizarModulo(3,'Nombre',2);api.eliminarModulo(3);api.actualizarLeccion(5,'Clase',2,'https://example.com');api.eliminarLeccion(5);api.eliminarMaterial(8);assert.deepEqual(calls.map(x=>x.slice(0,2)),[['PUT','/api/v1/modulos/3'],['DELETE','/api/v1/modulos/3'],['PUT','/api/v1/lecciones/5'],['DELETE','/api/v1/lecciones/5'],['DELETE','/api/v1/materiales/8']])});
+test('Subir muestra progreso y espera la respuesta para finalizar',()=>{const eventos=new Subject<any>();const d=instance(Docente,{subirMaterialProgreso:()=>eventos,contenido:()=>of(contenido)});(globalThis as any).document={getElementById:()=>({value:'guia.pdf'})};d.seleccionado.set(curso);d.archivoLeccionId=5;d.archivo=new File(['pdf'],'guia.pdf');d.subirArchivo();eventos.next({type:HttpEventType.UploadProgress,loaded:50,total:100});assert.equal(d.avance(),50);assert.equal(d.procesando(),true);eventos.next({type:HttpEventType.Response,body:{}});assert.equal(d.procesando(),false);assert.equal(d.archivo,null);delete (globalThis as any).document});
+test('Un fallo de notificaciones conserva las inscripciones',()=>{const e=instance(Estudiante,{inscripcionesEstudiante:()=>of([{id:1}]),ordenesEstudiante:()=>of([]),notificacionesUsuario:()=>throwError(()=>new Error('Caído')),publicados:()=>of([])});e.cargar();assert.equal(e.inscripciones().length,1);assert.equal(e.fallos().length,1)});
+test('Administración conserva moderación si fallan retiros',()=>{const a=instance(Admin,{cursos:()=>of([curso]),ordenes:()=>of([]),retiros:()=>throwError(()=>new Error('Caído')),reembolsos:()=>of([])});a.cargar();assert.equal(a.cursos().length,1);assert.equal(a.fallos().length,1)});
+console.log(`${count} pruebas aprobadas. No se realizaron operaciones sobre el backend real.`);

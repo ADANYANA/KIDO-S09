@@ -1,0 +1,29 @@
+.idea/
+.vscode/
+**/target/
+**/logs/
+**/.env
+*.log
+.DS_Store
+
+/backups/
+
+# Archivos locales y privados
+.env
+.env.*
+!.env.example
+**/node_modules/
+**/.angular/
+**/target/
+backups/
+uploads/
+*.dump
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Respaldos temporales
+*.bak
+*.tmp

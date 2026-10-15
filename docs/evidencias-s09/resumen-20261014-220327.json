@@ -1,0 +1,13 @@
+﻿{
+    "inicioUtc":  "2026-10-15T02:57:06.5689399Z",
+    "finUtc":  "2026-10-15T03:03:27.4561952Z",
+    "usuarioWindows":  "ASUS",
+    "cursoId":  2,
+    "estudianteNormal":  633737,
+    "ordenNormal":  15,
+    "ordenCompensada":  16,
+    "ventaNormal":  "15|PENDIENTE|71.91",
+    "ventaCompensada":  "16|REVERTIDO|71.91",
+    "pruebas":  "Compra normal, duplicado de pago, fallo de inscripción y compensación repetida",
+    "pendiente":  "Capturar Kafka UI y repetir directamente el JSON inscripcion.fallida desde Kafka UI"
+}
